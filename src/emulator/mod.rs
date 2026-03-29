@@ -69,7 +69,7 @@ impl EmulatorState {
             emphasis: self.printer_state.emphasis,
             underline: self.printer_state.underline,
             italic: self.printer_state.italic,
-            buffer_lines: self.printer_state.buffer.len(),
+            buffer_lines: self.printer_state.get_buffer().len(),
             command_count: self.command_history.len(),
             dpi: self.printer_state.dpi,
         }

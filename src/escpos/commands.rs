@@ -2,31 +2,36 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum EscPosCommand {
-    // Commandes de base
+    // Basic commands
     Text(String),
     NewLine,
     LineFeed,
     CarriageReturn,
-    
-    // Commandes de police
+
+    // Font commands
     SetFont(Font),
     SetFontSize(u32),
-    
-    // Commandes de formatage
+
+    // Formatting commands
     SetJustification(Justification),
     SetEmphasis(bool),
     SetUnderline(bool),
     SetItalic(bool),
     SetLineHeight(u32),
-    
-    // Commandes d'impression
+
+    // Print commands
     CutPaper,
     PrintImage(Vec<u8>),
-    
-    // Commandes de contrôle
+    /// Raster bitmap with width (bytes per row) and height (rows)
+    PrintRasterImage { width_bytes: u16, height: u16, data: Vec<u8> },
+
+    // Codepage selection (ESC t n)
+    SetCodepage(u8),
+
+    // Control commands
     InitializePrinter,
-    
-    // Commandes inconnues
+
+    // Unknown commands
     Unknown(Vec<u8>),
 }
 

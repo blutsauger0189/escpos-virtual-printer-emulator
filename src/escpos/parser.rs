@@ -19,7 +19,6 @@ impl EscPosParser {
 
         while i < self.buffer.len() {
             match self.buffer[i] {
-                // Commandes de base
                 b'\n' => {
                     commands.push(EscPosCommand::NewLine);
                     i += 1;
@@ -28,22 +27,43 @@ impl EscPosParser {
                     commands.push(EscPosCommand::CarriageReturn);
                     i += 1;
                 }
-                b'\x1B' => {
-                    // Séquence ESC
-                    if i + 1 < self.buffer.len() {
-                        let command = self.parse_esc_command(&self.buffer[i..])?;
-                        if let Some(cmd) = command {
+                0x1B => {
+                    // ESC sequence
+                    if i + 1 >= self.buffer.len() {
+                        break; // Wait for more data
+                    }
+                    match self.parse_esc_command(&self.buffer[i..]) {
+                        Ok(Some((cmd, consumed))) => {
                             commands.push(cmd);
+                            i += consumed;
                         }
-                        i += 2; // ESC + commande
-                    } else {
-                        break; // Attendre plus de données
+                        Ok(None) => break, // Incomplete, wait for more
+                        Err(_) => { i += 2; } // Skip bad ESC sequence
+                    }
+                }
+                0x1D => {
+                    // GS sequence
+                    if i + 1 >= self.buffer.len() {
+                        break;
+                    }
+                    match self.parse_gs_command(&self.buffer[i..]) {
+                        Ok(Some((cmd, consumed))) => {
+                            commands.push(cmd);
+                            i += consumed;
+                        }
+                        Ok(None) => break,
+                        Err(_) => { i += 2; }
                     }
                 }
                 _ => {
-                    // Texte normal
+                    // Normal text bytes
                     let text_start = i;
-                    while i < self.buffer.len() && self.buffer[i] != b'\x1B' && self.buffer[i] != b'\n' && self.buffer[i] != b'\r' {
+                    while i < self.buffer.len()
+                        && self.buffer[i] != 0x1B
+                        && self.buffer[i] != 0x1D
+                        && self.buffer[i] != b'\n'
+                        && self.buffer[i] != b'\r'
+                    {
                         i += 1;
                     }
                     if i > text_start {
@@ -56,7 +76,6 @@ impl EscPosParser {
             }
         }
 
-        // Nettoyer le buffer des données traitées
         if i > 0 {
             self.buffer.drain(0..i);
         }
@@ -64,117 +83,147 @@ impl EscPosParser {
         Ok(commands)
     }
 
-    fn parse_esc_command(&self, data: &[u8]) -> Result<Option<EscPosCommand>> {
+    /// Parse ESC (0x1B) commands. Returns (command, bytes_consumed).
+    fn parse_esc_command(&self, data: &[u8]) -> Result<Option<(EscPosCommand, usize)>> {
         if data.len() < 2 {
             return Ok(None);
         }
 
         match data[1] {
-            // Initialisation de l'imprimante
-            b'@' => Ok(Some(EscPosCommand::InitializePrinter)),
+            // Initialize printer
+            b'@' => Ok(Some((EscPosCommand::InitializePrinter, 2))),
 
-            // Sélection de la police
+            // Select font
             b'M' => {
-                if data.len() >= 3 {
-                    let font = match data[2] {
-                        0 => Font::FontA,
-                        1 => Font::FontB,
-                        2 => Font::FontC,
-                        _ => Font::FontA,
-                    };
-                    Ok(Some(EscPosCommand::SetFont(font)))
-                } else {
-                    Ok(Some(EscPosCommand::SetFont(Font::FontA)))
-                }
+                if data.len() < 3 { return Ok(None); }
+                let font = match data[2] {
+                    0 => Font::FontA,
+                    1 => Font::FontB,
+                    2 => Font::FontC,
+                    _ => Font::FontA,
+                };
+                Ok(Some((EscPosCommand::SetFont(font), 3)))
             }
 
             // Justification
             b'a' => {
-                if data.len() >= 3 {
-                    let justification = match data[2] {
-                        0 => Justification::Left,
-                        1 => Justification::Center,
-                        2 => Justification::Right,
-                        _ => Justification::Left,
-                    };
-                    Ok(Some(EscPosCommand::SetJustification(justification)))
-                } else {
-                    Ok(Some(EscPosCommand::SetJustification(Justification::Left)))
-                }
+                if data.len() < 3 { return Ok(None); }
+                let j = match data[2] {
+                    0 => Justification::Left,
+                    1 => Justification::Center,
+                    2 => Justification::Right,
+                    _ => Justification::Left,
+                };
+                Ok(Some((EscPosCommand::SetJustification(j), 3)))
             }
 
-            // Emphase
-            b'E' => Ok(Some(EscPosCommand::SetEmphasis(true))),
-            b'F' => Ok(Some(EscPosCommand::SetEmphasis(false))),
+            // Emphasis on/off
+            b'E' => Ok(Some((EscPosCommand::SetEmphasis(true), 2))),
+            b'F' => Ok(Some((EscPosCommand::SetEmphasis(false), 2))),
 
-            // Soulignement
+            // Underline
             b'-' => {
-                if data.len() >= 3 {
-                    let underline = data[2];
-                    Ok(Some(EscPosCommand::SetUnderline(underline != 0)))
-                } else {
-                    Ok(Some(EscPosCommand::SetUnderline(false)))
-                }
+                if data.len() < 3 { return Ok(None); }
+                Ok(Some((EscPosCommand::SetUnderline(data[2] != 0), 3)))
             }
 
-            // Italique
-            b'4' => Ok(Some(EscPosCommand::SetItalic(true))),
-            b'5' => Ok(Some(EscPosCommand::SetItalic(false))),
+            // Italic on/off
+            b'4' => Ok(Some((EscPosCommand::SetItalic(true), 2))),
+            b'5' => Ok(Some((EscPosCommand::SetItalic(false), 2))),
 
-            // Hauteur de ligne
+            // Line height
             b'3' => {
-                if data.len() >= 3 {
-                    let height = data[2] as u32;
-                    Ok(Some(EscPosCommand::SetLineHeight(height)))
-                } else {
-                    Ok(Some(EscPosCommand::SetLineHeight(24)))
-                }
+                if data.len() < 3 { return Ok(None); }
+                Ok(Some((EscPosCommand::SetLineHeight(data[2] as u32), 3)))
             }
 
-            // Taille de police
+            // Font size / print mode
             b'!' => {
-                if data.len() >= 3 {
-                    let size = data[2] as u32;
-                    Ok(Some(EscPosCommand::SetFontSize(size)))
-                } else {
-                    Ok(Some(EscPosCommand::SetFontSize(12)))
-                }
+                if data.len() < 3 { return Ok(None); }
+                Ok(Some((EscPosCommand::SetFontSize(data[2] as u32), 3)))
             }
 
-            // Coupe du papier
-            b'm' => Ok(Some(EscPosCommand::CutPaper)),
-            b'i' => Ok(Some(EscPosCommand::CutPaper)),
+            // Codepage selection (ESC t n)
+            b't' => {
+                if data.len() < 3 { return Ok(None); }
+                Ok(Some((EscPosCommand::SetCodepage(data[2]), 3)))
+            }
 
-            // Alimentation du papier
+            // Cut paper
+            b'm' | b'i' => Ok(Some((EscPosCommand::CutPaper, 2))),
+
+            // Paper feed
             b'J' => {
-                if data.len() >= 3 {
-                    let _units = data[2] as u32;
-                    Ok(Some(EscPosCommand::LineFeed))
-                } else {
-                    Ok(Some(EscPosCommand::LineFeed))
-                }
+                if data.len() < 3 { return Ok(None); }
+                Ok(Some((EscPosCommand::LineFeed, 3)))
             }
 
-            // Image raster (simplifié)
+            // Bit image (ESC *) — simplified
             b'*' => {
-                if data.len() >= 6 {
-                    let width = ((data[2] as u16) << 8) | (data[3] as u16);
-                    let height = ((data[4] as u16) << 8) | (data[5] as u16);
-                    let image_data = if data.len() >= 6 + (width * height / 8) as usize {
-                        data[6..6 + (width * height / 8) as usize].to_vec()
-                    } else {
-                        vec![]
-                    };
-                    Ok(Some(EscPosCommand::PrintImage(image_data)))
-                } else {
-                    Ok(Some(EscPosCommand::PrintImage(vec![])))
+                if data.len() < 4 { return Ok(None); }
+                let m = data[2];
+                let nl = data[3] as u16;
+                if data.len() < 5 { return Ok(None); }
+                let nh = data[4] as u16;
+                let n_dots = nl + nh * 256;
+                let bytes_per_col: u16 = match m { 0 | 1 => 1, 32 | 33 => 3, _ => 1 };
+                let total = bytes_per_col as usize * n_dots as usize;
+                let consumed = 5 + total;
+                if data.len() < consumed { return Ok(None); }
+                let image_data = data[5..consumed].to_vec();
+                Ok(Some((EscPosCommand::PrintImage(image_data), consumed)))
+            }
+
+            _ => {
+                Ok(Some((EscPosCommand::Unknown(data[..2].to_vec()), 2)))
+            }
+        }
+    }
+
+    /// Parse GS (0x1D) commands. Returns (command, bytes_consumed).
+    fn parse_gs_command(&self, data: &[u8]) -> Result<Option<(EscPosCommand, usize)>> {
+        if data.len() < 2 {
+            return Ok(None);
+        }
+
+        match data[1] {
+            // GS v 0 — Print raster bit image
+            b'v' => {
+                if data.len() < 8 { return Ok(None); }
+                // GS v 0 m xL xH yL yH d1...dk
+                let _mode = data[3]; // 0=normal, 1=double-width, 2=double-height, 3=both
+                let x_l = data[4] as u16;
+                let x_h = data[5] as u16;
+                let y_l = data[6] as u16;
+                let y_h = data[7] as u16;
+                let width_bytes = x_l + x_h * 256; // bytes per row
+                let height = y_l + y_h * 256;       // number of rows
+                let total = width_bytes as usize * height as usize;
+                let consumed = 8 + total;
+                if data.len() < consumed { return Ok(None); }
+                let image_data = data[8..consumed].to_vec();
+                Ok(Some((
+                    EscPosCommand::PrintRasterImage { width_bytes, height, data: image_data },
+                    consumed,
+                )))
+            }
+
+            // GS V — Cut paper (with variants)
+            b'V' => {
+                if data.len() < 3 { return Ok(None); }
+                match data[2] {
+                    0 | 1 => Ok(Some((EscPosCommand::CutPaper, 3))),
+                    65 | 66 => {
+                        // GS V 65/66 n — need one more byte
+                        if data.len() < 4 { return Ok(None); }
+                        Ok(Some((EscPosCommand::CutPaper, 4)))
+                    }
+                    _ => Ok(Some((EscPosCommand::CutPaper, 3))),
                 }
             }
 
-            // Commande inconnue
             _ => {
-                let unknown_data = data.to_vec();
-                Ok(Some(EscPosCommand::Unknown(unknown_data)))
+                Ok(Some((EscPosCommand::Unknown(data[..2].to_vec()), 2)))
             }
         }
     }

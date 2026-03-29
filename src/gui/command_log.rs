@@ -147,7 +147,13 @@ impl CommandLog {
                     "✂️ Paper cut".to_string()
                 }
                 crate::escpos::commands::EscPosCommand::PrintImage(_) => {
-                    "🖼️ Image".to_string()
+                    "🖼️ Bit Image (ESC *)".to_string()
+                }
+                crate::escpos::commands::EscPosCommand::PrintRasterImage { width_bytes, height, .. } => {
+                    format!("🖼️ Raster Image (GS v 0) {}×{}", width_bytes * 8, height)
+                }
+                crate::escpos::commands::EscPosCommand::SetCodepage(cp) => {
+                    format!("🌐 Codepage: {}", cp)
                 }
                 crate::escpos::commands::EscPosCommand::SetLineHeight(height) => {
                     format!("📏 Line height: {}", height)
