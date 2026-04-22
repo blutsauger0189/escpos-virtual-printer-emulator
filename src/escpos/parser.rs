@@ -1,14 +1,17 @@
+use crate::escpos::codepage;
 use crate::escpos::commands::{EscPosCommand, Font, Justification};
 use anyhow::Result;
 
 pub struct EscPosParser {
     buffer: Vec<u8>,
+    codepage: u8,
 }
 
 impl EscPosParser {
     pub fn new() -> Self {
         Self {
             buffer: Vec::new(),
+            codepage: 0,
         }
     }
 
@@ -34,6 +37,9 @@ impl EscPosParser {
                     }
                     match self.parse_esc_command(&self.buffer[i..]) {
                         Ok(Some((cmd, consumed))) => {
+                            if let EscPosCommand::SetCodepage(cp) = cmd {
+                                self.codepage = cp;
+                            }
                             commands.push(cmd);
                             i += consumed;
                         }
@@ -67,7 +73,7 @@ impl EscPosParser {
                         i += 1;
                     }
                     if i > text_start {
-                        let text = String::from_utf8_lossy(&self.buffer[text_start..i]).to_string();
+                        let text = codepage::decode(self.codepage, &self.buffer[text_start..i]);
                         if !text.is_empty() {
                             commands.push(EscPosCommand::Text(text));
                         }
@@ -239,6 +245,7 @@ impl Clone for EscPosParser {
     fn clone(&self) -> Self {
         Self {
             buffer: self.buffer.clone(),
+            codepage: self.codepage,
         }
     }
 }

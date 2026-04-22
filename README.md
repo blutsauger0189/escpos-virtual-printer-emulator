@@ -2,7 +2,7 @@
 
 [![Rust](https://img.shields.io/badge/rust-1.70+-orange.svg)](https://www.rust-lang.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux-lightgrey.svg)](https://github.com/your-username/escpos-virtual-printer-emulator)
+[![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey.svg)](https://github.com/your-username/escpos-virtual-printer-emulator)
 
 > **ESC/POS virtual printer emulator built in Rust**  
 > Transform your computer into a virtual receipt printer for testing and development
@@ -24,7 +24,7 @@
 
 ### Prerequisites
 - **Rust 1.70+** - [Install Rust](https://rustup.rs/)
-- **Windows 10/11** or **Linux** with CUPS
+- **Windows 10/11**, **Linux** with CUPS, or **macOS** (CUPS preinstalled)
 - **Administrator privileges** (for printer installation)
 
 ### Installation
@@ -47,8 +47,9 @@
 
 4. **Install virtual printer**
    - Go to **Settings** tab
-   - Click **"🖨️ Install Windows Printer"** (requires admin)
-   - The printer will appear in Windows "Devices and Printers"
+   - **Windows**: click **"🖨️ Install Windows Printer"** (requires admin). The printer appears in "Devices and Printers".
+   - **Linux**: click **"🐧 Install Linux Printer"** (requires `sudo`). The printer is registered in CUPS.
+   - **macOS**: click **"🍎 Install macOS Printer"** (requires `sudo` in the terminal where the app was launched). The printer appears in **System Settings → Printers & Scanners**.
 
 
 ### Basic Usage

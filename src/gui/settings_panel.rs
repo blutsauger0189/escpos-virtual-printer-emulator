@@ -1,6 +1,8 @@
 use crate::emulator::EmulatorState;
 use egui::Ui;
+use std::net::TcpStream;
 use std::process::Command;
+use std::time::Duration;
 
 pub struct SettingsPanel {
     // No more useless settings - the emulator works according to ESC/POS standards
@@ -13,6 +15,19 @@ impl Default for SettingsPanel {
 }
 
 impl SettingsPanel {
+    fn current_os() -> &'static str {
+        std::env::consts::OS
+    }
+
+    fn printer_name() -> &'static str {
+        match Self::current_os() {
+            "windows" => "ESC_POS_Virtual_Printer",
+            "linux" => "ESC_POS_Linux_Printer",
+            "macos" => "ESC_POS_macOS_Printer",
+            _ => "ESC_POS_Virtual_Printer",
+        }
+    }
+
     pub fn show(&mut self, ui: &mut Ui, _state: &mut EmulatorState) {
         ui.heading("Emulator Settings");
         ui.separator();
@@ -21,23 +36,36 @@ impl SettingsPanel {
         ui.group(|ui| {
             ui.label("Virtual Printer Management");
             ui.label("Installs the emulator as a system printer");
-            
+
             ui.horizontal(|ui| {
-                if ui.button("🖨️ Install Windows Printer").clicked() {
-                    self.install_windows_printer();
+                match Self::current_os() {
+                    "windows" => {
+                        if ui.button("🖨️ Install Windows Printer").clicked() {
+                            self.install_windows_printer();
+                        }
+                    }
+                    "linux" => {
+                        if ui.button("🐧 Install Linux Printer").clicked() {
+                            self.install_linux_printer();
+                        }
+                    }
+                    "macos" => {
+                        if ui.button("🍎 Install macOS Printer").clicked() {
+                            self.install_macos_printer();
+                        }
+                    }
+                    other => {
+                        ui.label(format!("Printer installation not supported on {}", other));
+                    }
                 }
-                
-                if ui.button("🐧 Install Linux Printer").clicked() {
-                    self.install_linux_printer();
-                }
-                
+
                 if ui.button("🗑️ Uninstall Printer").clicked() {
                     self.uninstall_printer();
                 }
             });
 
             ui.label("Note: Requires administrator privileges");
-            
+
             // Check printer status
             if ui.button("🔍 Check Status").clicked() {
                 self.check_printer_status();
@@ -51,7 +79,7 @@ impl SettingsPanel {
             ui.label("Network Configuration");
             ui.label("TCP Port: 9100");
             ui.label("Address: 127.0.0.1");
-            
+
             if ui.button("📡 Test Connection").clicked() {
                 self.test_network_connection();
             }
@@ -70,15 +98,16 @@ impl SettingsPanel {
     }
 
     fn install_windows_printer(&self) {
-        // Simplified PowerShell command to avoid syntax errors
+        let name = Self::printer_name();
+        let script = format!(
+            "Add-PrinterPort -Name '127.0.0.1:9100' -PrinterHostAddress '127.0.0.1' -PortNumber 9100; \
+             $driver = (Get-PrinterDriver | Where-Object {{ $_.Name -like '*Microsoft*' }} | Select-Object -First 1).Name; \
+             Add-Printer -Name '{name}' -DriverName $driver -PortName '127.0.0.1:9100'; \
+             Write-Host 'Printer installed successfully'"
+        );
+
         let output = Command::new("powershell")
-            .args([
-                "-Command",
-                "Add-PrinterPort -Name '127.0.0.1:9100' -PrinterHostAddress '127.0.0.1' -PortNumber 9100; \
-                 $driver = (Get-PrinterDriver | Where-Object { $_.Name -like '*Microsoft*' } | Select-Object -First 1).Name; \
-                 Add-Printer -Name 'ESC_POS_Virtual_Printer' -DriverName $driver -PortName '127.0.0.1:9100'; \
-                 Write-Host 'Printer installed successfully'"
-            ])
+            .args(["-Command", &script])
             .output();
 
         match output {
@@ -98,20 +127,19 @@ impl SettingsPanel {
     }
 
     fn install_linux_printer(&self) {
-        // Install Linux printer using CUPS
-        let output = Command::new("bash")
-            .args([
-                "-c",
-                "if command -v lpstat &> /dev/null; then \
-                    echo 'Installing Linux printer...'; \
-                    sudo lpadmin -p ESC_POS_Linux_Printer -E -v socket://127.0.0.1:9100 -m 'Generic Text-Only Printer'; \
-                    sudo lpadmin -d ESC_POS_Linux_Printer; \
-                    echo 'Linux printer installed successfully!'; \
-                else \
-                    echo 'CUPS not found. Please install CUPS first.'; \
-                fi"
-            ])
-            .output();
+        let name = Self::printer_name();
+        let script = format!(
+            "if command -v lpstat &> /dev/null; then \
+                echo 'Installing Linux printer...'; \
+                sudo lpadmin -p {name} -E -v socket://127.0.0.1:9100 -m 'Generic Text-Only Printer'; \
+                sudo lpadmin -d {name}; \
+                echo 'Linux printer installed successfully!'; \
+            else \
+                echo 'CUPS not found. Please install CUPS first.'; \
+            fi"
+        );
+
+        let output = Command::new("bash").args(["-c", &script]).output();
 
         match output {
             Ok(output) => {
@@ -129,16 +157,67 @@ impl SettingsPanel {
         }
     }
 
+    fn install_macos_printer(&self) {
+        let name = Self::printer_name();
+        let script = format!(
+            "if command -v lpadmin &> /dev/null; then \
+                echo 'Installing macOS printer...'; \
+                sudo lpadmin -p {name} -E -v socket://127.0.0.1:9100 -m drv:///sample.drv/generic.ppd; \
+                sudo cupsenable {name}; \
+                sudo cupsaccept {name}; \
+                echo 'macOS printer installed successfully!'; \
+            else \
+                echo 'CUPS not found. lpadmin is required.'; \
+            fi"
+        );
+
+        let output = Command::new("bash").args(["-c", &script]).output();
+
+        match output {
+            Ok(output) => {
+                if output.status.success() {
+                    let stdout = String::from_utf8_lossy(&output.stdout);
+                    println!("ℹ️  {}", stdout);
+                } else {
+                    let stderr = String::from_utf8_lossy(&output.stderr);
+                    println!("ℹ️  {}", stderr);
+                }
+            }
+            Err(e) => {
+                println!("ℹ️  macOS installation attempted: {}", e);
+            }
+        }
+    }
+
     fn uninstall_printer(&self) {
-        // Simplified PowerShell command
-        let output = Command::new("powershell")
-            .args([
-                "-Command",
-                "Remove-Printer -Name 'ESC_POS_Virtual_Printer' -Confirm:$false; \
-                 Remove-PrinterPort -Name '127.0.0.1:9100'; \
-                 Write-Host 'Printer uninstalled successfully'"
-            ])
-            .output();
+        let name = Self::printer_name();
+
+        let output = match Self::current_os() {
+            "windows" => {
+                let script = format!(
+                    "Remove-Printer -Name '{name}' -Confirm:$false; \
+                     Remove-PrinterPort -Name '127.0.0.1:9100'; \
+                     Write-Host 'Printer uninstalled successfully'"
+                );
+                Command::new("powershell")
+                    .args(["-Command", &script])
+                    .output()
+            }
+            "linux" | "macos" => {
+                let script = format!(
+                    "if command -v lpadmin &> /dev/null; then \
+                        sudo lpadmin -x {name} && echo 'Printer uninstalled successfully'; \
+                    else \
+                        echo 'CUPS not found. lpadmin is required.'; \
+                    fi"
+                );
+                Command::new("bash").args(["-c", &script]).output()
+            }
+            other => {
+                println!("❌ Uninstall not supported on {}", other);
+                return;
+            }
+        };
 
         match output {
             Ok(output) => {
@@ -157,24 +236,33 @@ impl SettingsPanel {
     }
 
     fn check_printer_status(&self) {
-        // Check if printer is installed
-        let output = Command::new("powershell")
-            .args([
-                "-Command",
-                "Get-Printer -Name 'ESC_POS_Virtual_Printer' -ErrorAction SilentlyContinue | Select-Object Name, PortName, DriverName, PrinterStatus"
-            ])
-            .output();
+        let name = Self::printer_name();
+
+        let output = match Self::current_os() {
+            "windows" => {
+                let script = format!(
+                    "Get-Printer -Name '{name}' -ErrorAction SilentlyContinue | \
+                     Select-Object Name, PortName, DriverName, PrinterStatus"
+                );
+                Command::new("powershell")
+                    .args(["-Command", &script])
+                    .output()
+            }
+            "linux" | "macos" => Command::new("lpstat").args(["-p", name]).output(),
+            other => {
+                println!("❌ Status check not supported on {}", other);
+                return;
+            }
+        };
 
         match output {
             Ok(output) => {
-                if output.status.success() {
-                    let stdout = String::from_utf8_lossy(&output.stdout);
-                    if stdout.trim().is_empty() {
-                        println!("ℹ️  Virtual printer not installed");
-                    } else {
-                        println!("✅ Virtual printer installed:");
-                        println!("{}", stdout);
-                    }
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                if output.status.success() && !stdout.trim().is_empty() {
+                    println!("✅ Virtual printer installed:");
+                    println!("{}", stdout);
+                } else {
+                    println!("ℹ️  Virtual printer not installed");
                 }
             }
             Err(e) => {
@@ -184,30 +272,10 @@ impl SettingsPanel {
     }
 
     fn test_network_connection(&self) {
-        // Test connection to port 9100
-        let output = Command::new("powershell")
-            .args([
-                "-Command",
-                "Test-NetConnection -ComputerName 127.0.0.1 -Port 9100 -WarningAction SilentlyContinue | Select-Object TcpTestSucceeded"
-            ])
-            .output();
-
-        match output {
-            Ok(output) => {
-                if output.status.success() {
-                    let stdout = String::from_utf8_lossy(&output.stdout);
-                    if stdout.contains("True") {
-                        println!("✅ Connection to port 9100 successful");
-                    } else {
-                        println!("❌ Connection to port 9100 failed");
-                    }
-                } else {
-                    println!("❌ Cannot test connection");
-                }
-            }
-            Err(e) => {
-                println!("❌ Cannot test connection: {}", e);
-            }
+        let address = "127.0.0.1:9100".parse().unwrap();
+        match TcpStream::connect_timeout(&address, Duration::from_secs(2)) {
+            Ok(_) => println!("✅ Connection to port 9100 successful"),
+            Err(e) => println!("❌ Connection to port 9100 failed: {}", e),
         }
     }
 }
