@@ -159,32 +159,41 @@ impl SettingsPanel {
 
     fn install_macos_printer(&self) {
         let name = Self::printer_name();
-        let script = format!(
-            "if command -v lpadmin &> /dev/null; then \
-                echo 'Installing macOS printer...'; \
-                sudo lpadmin -p {name} -E -v socket://127.0.0.1:9100 -m drv:///sample.drv/generic.ppd; \
-                sudo cupsenable {name}; \
-                sudo cupsaccept {name}; \
-                echo 'macOS printer installed successfully!'; \
-            else \
-                echo 'CUPS not found. lpadmin is required.'; \
-            fi"
+        let shell_cmd = format!(
+            "lpadmin -p {name} -E -v socket://127.0.0.1:9100 -m drv:///sample.drv/generic.ppd && \
+             cupsenable {name} && cupsaccept {name}"
+        );
+        self.run_macos_privileged(&shell_cmd, "macOS printer installed successfully");
+    }
+
+    /// Run a shell command with admin privileges on macOS using the native
+    /// Authorization Services prompt (the standard system password dialog)
+    /// instead of `sudo`, which would require a TTY and hang when the app is
+    /// launched from Finder.
+    fn run_macos_privileged(&self, shell_cmd: &str, success_msg: &str) {
+        let escaped = shell_cmd.replace('\\', "\\\\").replace('"', "\\\"");
+        let applescript = format!(
+            "do shell script \"{}\" with administrator privileges",
+            escaped
         );
 
-        let output = Command::new("bash").args(["-c", &script]).output();
+        let output = Command::new("osascript").args(["-e", &applescript]).output();
 
         match output {
             Ok(output) => {
                 if output.status.success() {
+                    println!("ℹ️  {}", success_msg);
                     let stdout = String::from_utf8_lossy(&output.stdout);
-                    println!("ℹ️  {}", stdout);
+                    if !stdout.trim().is_empty() {
+                        println!("{}", stdout);
+                    }
                 } else {
                     let stderr = String::from_utf8_lossy(&output.stderr);
-                    println!("ℹ️  {}", stderr);
+                    println!("❌ {}", stderr.trim());
                 }
             }
             Err(e) => {
-                println!("ℹ️  macOS installation attempted: {}", e);
+                println!("❌ Cannot launch osascript: {}", e);
             }
         }
     }
@@ -203,7 +212,14 @@ impl SettingsPanel {
                     .args(["-Command", &script])
                     .output()
             }
-            "linux" | "macos" => {
+            "macos" => {
+                self.run_macos_privileged(
+                    &format!("lpadmin -x {name}"),
+                    "Printer uninstalled successfully",
+                );
+                return;
+            }
+            "linux" => {
                 let script = format!(
                     "if command -v lpadmin &> /dev/null; then \
                         sudo lpadmin -x {name} && echo 'Printer uninstalled successfully'; \
